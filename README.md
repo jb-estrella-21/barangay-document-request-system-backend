@@ -16,7 +16,7 @@ npm run start:dev
 
 The API listens on `http://localhost:3000`. OpenAPI UI is at `/api/docs`, its JSON document at `/api/docs-json`, and the database health check at `/health`.
 
-Replace the example `IDEMPOTENCY_ENCRYPTION_KEY` before using non-local data. Generate a 32-byte base64 key with `openssl rand -base64 32`. Production startup requires `COOKIE_SECURE=true`, at least one exact `CORS_ORIGINS` entry, a non-example encryption key, HTTPS termination, and a restricted database role. `TRUST_PROXY=true` is only for deployments behind one trusted reverse proxy.
+Replace the example IDEMPOTENCY_ENCRYPTION_KEY before using non-local data. Generate a 32-byte base64 key with openssl rand -base64 32. Production startup requires COOKIE_SECURE=true, at least one exact CORS_ORIGINS entry, a non-example encryption key, a distinct 32-byte base64 CLIENT_IP_HMAC_SECRET, HTTPS termination, and a restricted database role. Keep TRUST_PROXY=false behind the prepared Pages proxy; signed client-IP metadata is only rate-limit attribution.
 
 After applying migrations and building, create the first administrator from an interactive terminal:
 
@@ -60,3 +60,12 @@ Run `npm run test:e2e:safety -- --runInBand` to test the gate without connecting
 ## Current operational boundaries
 
 Request attachments, messages, payments, resident account creation, online identity checks, assignment, and multi-barangay tenancy are not implemented. Data retention remains a barangay decision and must be approved before launch; this MVP does not automatically delete historical resident requests. The in-process rate limiter is intended for a single API instance; multiple replicas need a shared rate-limit store or equivalent edge limits.
+
+
+## Phase 5B deployment preparation
+
+The Render blueprint prepares a Free Node service with the existing build/start scripts, platform-provided PORT, no startup migrations, and no scheduled database health probe. Complete unresolved values only after separate Phase 5C approval. Runtime DATABASE_URL should be Neon's pooled TLS URL; use the direct TLS URL only for a controlled migration or backup.
+
+Before a later migration, connect to the intended database and verify its identity with SELECT current_database(). Apply checked-in migrations manually using DATABASE_URL="$NEON_DIRECT_URL" npm run prisma:migrate:deploy; never configure migrations to run at service startup. Phase 5B makes no cloud connection or database change.
+
+The Pages proxy signs a versioned payload containing timestamp, edge IP, method, and path. The API verifies it in constant time within a 60-second window and uses the IP only for rate-limit tracking. The signature is not authentication and can be replayed temporarily into the same IP/method/path bucket. Raw forwarding headers remain untrusted. The in-memory rate limiter resets on process restart; the database-backed staff sessions do not, subject to normal expiry and revocation.

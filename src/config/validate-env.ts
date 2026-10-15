@@ -9,6 +9,7 @@ export type AppEnvironment = {
   CORS_ORIGINS: string[];
   TRUST_PROXY: boolean;
   IDEMPOTENCY_ENCRYPTION_KEY: Buffer;
+  CLIENT_IP_HMAC_SECRET: Buffer | null;
   LOG_LEVEL: string;
 };
 
@@ -38,6 +39,16 @@ export function validateEnvironment(raw: Record<string, unknown>): AppEnvironmen
     throw new Error('IDEMPOTENCY_ENCRYPTION_KEY must be a base64-encoded 32-byte key');
   }
 
+  const encodedProxyKey = String(raw.CLIENT_IP_HMAC_SECRET ?? '');
+  const proxyKey = encodedProxyKey ? Buffer.from(encodedProxyKey, 'base64') : null;
+  if (proxyKey && (proxyKey.length !== 32 || proxyKey.toString('base64').replace(/=+$/, '') !== encodedProxyKey.replace(/=+$/, ''))) {
+    throw new Error('CLIENT_IP_HMAC_SECRET must be a base64-encoded 32-byte key');
+  }
+  if (nodeEnv === 'production' && !proxyKey) throw new Error('CLIENT_IP_HMAC_SECRET is required in production');
+  if (nodeEnv === 'production' && proxyKey?.every((byte) => byte === 0)) {
+    throw new Error('CLIENT_IP_HMAC_SECRET must not use an all-zero key in production');
+  }
+
   const sameSite = String(raw.COOKIE_SAME_SITE ?? 'lax').toLowerCase();
   if (!['lax', 'strict', 'none'].includes(sameSite)) throw new Error('COOKIE_SAME_SITE must be lax, strict, or none');
   const cookieSecure = toBoolean(String(raw.COOKIE_SECURE ?? ''), nodeEnv === 'production');
@@ -58,6 +69,7 @@ export function validateEnvironment(raw: Record<string, unknown>): AppEnvironmen
     CORS_ORIGINS: corsOrigins,
     TRUST_PROXY: toBoolean(String(raw.TRUST_PROXY ?? '')),
     IDEMPOTENCY_ENCRYPTION_KEY: encryptionKey,
+    CLIENT_IP_HMAC_SECRET: proxyKey,
     LOG_LEVEL: String(raw.LOG_LEVEL ?? 'info'),
   };
 }

@@ -1,3 +1,6 @@
+import { createHmac } from 'node:crypto';
+import { isIP } from 'node:net';
+import { NextFunction, Request, Response } from 'express';
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { RequestStatus, StaffRole } from '@prisma/client';
@@ -20,21 +23,37 @@ describe('Barangay request API (e2e)', () => {
   let staffRequestSequence = 0;
 
   const origin = 'http://localhost:5173';
+  const testProxySecret = Buffer.alloc(32, 23);
 
   beforeAll(async () => withValidatedE2eConfiguration(process.env, async (database) => {
     process.env.NODE_ENV = 'test';
     process.env.DATABASE_URL = database.databaseUrl;
     process.env.CORS_ORIGINS = origin;
-    process.env.TRUST_PROXY = 'true';
+    process.env.TRUST_PROXY = 'false';
     process.env.LOG_LEVEL = 'silent';
     process.env.COOKIE_SECURE = 'false';
     process.env.COOKIE_SAME_SITE = 'lax';
     process.env.SESSION_COOKIE_NAME = 'test_staff_session';
     process.env.IDEMPOTENCY_ENCRYPTION_KEY = Buffer.alloc(32, 11).toString('base64');
+    process.env.CLIENT_IP_HMAC_SECRET = testProxySecret.toString('base64');
     const { AppModule } = await import('../src/app.module');
     const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = module.createNestApplication({ bodyParser: false });
     configureHttpApplication(app);
+    // Simulate the Pages edge locally: only this test proxy signs its synthetic IP header.
+    app.use((req: Request, _res: Response, next: NextFunction) => {
+      if (req.headers['x-proxy-client-ip']) return next();
+      const forwarded = req.headers['x-forwarded-for'];
+      const ip = typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : '';
+      if (isIP(ip) !== 0) {
+        const timestamp = String(Math.floor(Date.now() / 1000));
+        const message = ['v1', timestamp, ip, req.method.toUpperCase(), req.path].join('\n');
+        req.headers['x-proxy-client-ip'] = ip;
+        req.headers['x-proxy-client-ip-timestamp'] = timestamp;
+        req.headers['x-proxy-client-ip-signature'] = createHmac('sha256', testProxySecret).update(message).digest('hex');
+      }
+      next();
+    });
     try {
       await app.init();
       prisma = app.get(PrismaService);
@@ -113,6 +132,19 @@ describe('Barangay request API (e2e)', () => {
         fields: options.fields ?? { purpose: 'Employment' },
       });
   }
+
+  it('does not treat valid proxy rate-limit metadata as staff authentication', async () => {
+    const path = '/api/v1/staff/auth/me';
+    const ip = '198.51.100.230';
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const message = ['v1', timestamp, ip, 'GET', path].join('\n');
+    const signature = createHmac('sha256', testProxySecret).update(message).digest('hex');
+    await request(app.getHttpServer()).get(path).set({
+      'X-Proxy-Client-IP': ip,
+      'X-Proxy-Client-IP-Timestamp': timestamp,
+      'X-Proxy-Client-IP-Signature': signature,
+    }).expect(401);
+  });
 
   it('serializes concurrent first-administrator bootstrap attempts', async () => {
     await prisma.staffSession.deleteMany();

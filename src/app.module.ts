@@ -1,9 +1,10 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
-import { validateEnvironment } from './config/validate-env';
+import { AppEnvironment, validateEnvironment } from './config/validate-env';
+import { clientIpForRateLimit } from './common/proxy-client-ip';
 import { PrismaModule } from './database/prisma.module';
 import { CommonModule } from './common/common.module';
 import { HealthModule } from './health/health.module';
@@ -38,7 +39,17 @@ import { generateRequestId, sanitizeErrorLog, sanitizeRequestLog, sanitizeRespon
         },
       },
     }),
-    ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 100 }]),
+    ThrottlerModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService<AppEnvironment, true>) => ({
+        throttlers: [{ name: 'default', ttl: 60_000, limit: 100 }],
+        getTracker: (request: Record<string, unknown>) => clientIpForRateLimit(
+          request as unknown as Parameters<typeof clientIpForRateLimit>[0],
+          config.get('CLIENT_IP_HMAC_SECRET', { infer: true }),
+        ),
+      }),
+    }),
     PrismaModule,
     CommonModule,
     HealthModule,

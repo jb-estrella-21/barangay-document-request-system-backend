@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: barangay-document-request-api
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_VERSION
+        value: 22.23.2
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: IDEMPOTENCY_ENCRYPTION_KEY
+        sync: false
+      - key: CLIENT_IP_HMAC_SECRET
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: COOKIE_SAME_SITE
+        value: lax
+      - key: TRUST_PROXY
+        value: "false"
+      - key: SESSION_TTL_HOURS
+        value: "8"
+      - key: LOG_LEVEL
+        value: info
