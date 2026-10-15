@@ -1,0 +1,176 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum StaffRole {
+  ADMINISTRATOR
+  PROCESSOR
+}
+
+enum RequestStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  PROCESSING
+  READY_FOR_PICKUP
+  RELEASED
+  REJECTED
+  CANCELLED
+}
+
+enum HistoryEventType {
+  STATUS_CHANGED
+  RELEASE_DATE_CHANGED
+}
+
+model StaffUser {
+  id                    String        @id @default(uuid()) @db.Uuid
+  username              String        @unique @db.VarChar(80)
+  passwordHash          String        @map("password_hash") @db.VarChar(255)
+  role                  StaffRole
+  isActive              Boolean       @default(true) @map("is_active")
+  mustChangePassword    Boolean       @default(false) @map("must_change_password")
+  createdById           String?       @map("created_by_id") @db.Uuid
+  createdAt             DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  createdBy             StaffUser?    @relation("StaffCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdUsers          StaffUser[]   @relation("StaffCreator")
+  sessions              StaffSession[]
+  documentVersions      DocumentTypeVersion[] @relation("VersionCreator")
+  requestHistory        RequestStatusHistory[]
+  auditEvents           AuditEvent[]
+
+  @@index([role, isActive])
+  @@map("staff_users")
+}
+
+model StaffSession {
+  id             String    @id @default(uuid()) @db.Uuid
+  staffUserId    String    @map("staff_user_id") @db.Uuid
+  tokenHash      String    @unique @map("token_hash") @db.Char(64)
+  csrfTokenHash  String    @map("csrf_token_hash") @db.Char(64)
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt      DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastSeenAt     DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  staffUser      StaffUser @relation(fields: [staffUserId], references: [id], onDelete: Cascade)
+
+  @@index([staffUserId, expiresAt])
+  @@map("staff_sessions")
+}
+
+model DocumentType {
+  id               String                @id @default(uuid()) @db.Uuid
+  slug             String                @unique @db.VarChar(80)
+  isActive         Boolean               @default(true) @map("is_active")
+  currentVersion   Int                   @default(1) @map("current_version")
+  createdAt        DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  versions         DocumentTypeVersion[]
+
+  @@index([isActive, updatedAt])
+  @@map("document_types")
+}
+
+model DocumentTypeVersion {
+  id             String       @id @default(uuid()) @db.Uuid
+  documentTypeId String       @map("document_type_id") @db.Uuid
+  version        Int
+  name           String       @db.VarChar(160)
+  description    String       @db.VarChar(2000)
+  requirements   Json
+  fieldDefinitions Json       @map("field_definitions")
+  createdById   String?       @map("created_by_id") @db.Uuid
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  documentType  DocumentType  @relation(fields: [documentTypeId], references: [id], onDelete: Restrict)
+  createdBy     StaffUser?    @relation("VersionCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  requests      DocumentRequest[]
+
+  @@unique([documentTypeId, version])
+  @@index([documentTypeId, createdAt])
+  @@map("document_type_versions")
+}
+
+model DocumentRequest {
+  id                    String         @id @default(uuid()) @db.Uuid
+  reference             String         @unique @db.VarChar(32)
+  trackingSecretHash    String         @unique @map("tracking_secret_hash") @db.Char(64)
+  documentTypeVersionId String         @map("document_type_version_id") @db.Uuid
+  status                RequestStatus  @default(SUBMITTED)
+  fullName              String         @map("full_name") @db.VarChar(160)
+  contactNumber         String         @map("contact_number") @db.VarChar(40)
+  address               String         @db.VarChar(500)
+  applicantFields       Json           @default("{}") @map("applicant_fields")
+  expectedReleaseDate   DateTime?      @map("expected_release_date") @db.Date
+  readyAt               DateTime?      @map("ready_at") @db.Timestamptz(6)
+  releasedAt            DateTime?      @map("released_at") @db.Timestamptz(6)
+  publicStatusMessage   String?        @map("public_status_message") @db.VarChar(1000)
+  version               Int            @default(1)
+  createdAt             DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  documentTypeVersion   DocumentTypeVersion @relation(fields: [documentTypeVersionId], references: [id], onDelete: Restrict)
+  history               RequestStatusHistory[]
+  idempotency           SubmissionIdempotency?
+
+  @@index([status, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([expectedReleaseDate, status])
+  @@index([documentTypeVersionId, createdAt(sort: Desc)])
+  @@index([fullName])
+  @@index([contactNumber])
+  @@map("document_requests")
+}
+
+model RequestStatusHistory {
+  id                   String           @id @default(uuid()) @db.Uuid
+  requestId            String           @map("request_id") @db.Uuid
+  eventType            HistoryEventType @map("event_type")
+  fromStatus           RequestStatus?   @map("from_status")
+  toStatus             RequestStatus?   @map("to_status")
+  oldReleaseDate       DateTime?        @map("old_release_date") @db.Date
+  newReleaseDate       DateTime?        @map("new_release_date") @db.Date
+  publicMessage        String?          @map("public_message") @db.VarChar(1000)
+  reason               String?          @db.VarChar(1000)
+  internalNote         String?          @map("internal_note") @db.VarChar(2000)
+  actorId              String?          @map("actor_id") @db.Uuid
+  createdAt            DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  request              DocumentRequest  @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  actor                StaffUser?       @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([requestId, createdAt, id])
+  @@map("request_status_history")
+}
+
+model AuditEvent {
+  id          String    @id @default(uuid()) @db.Uuid
+  actorId     String?   @map("actor_id") @db.Uuid
+  action      String    @db.VarChar(100)
+  targetType  String    @map("target_type") @db.VarChar(100)
+  targetId    String?   @map("target_id") @db.VarChar(100)
+  before      Json?
+  after       Json?
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  actor       StaffUser? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt(sort: Desc), id(sort: Desc)])
+  @@index([actorId, createdAt(sort: Desc)])
+  @@index([targetType, targetId, createdAt(sort: Desc)])
+  @@map("audit_events")
+}
+
+model SubmissionIdempotency {
+  id                    String         @id @default(uuid()) @db.Uuid
+  keyHash               String         @unique @map("key_hash") @db.Char(64)
+  requestFingerprint    String         @map("request_fingerprint") @db.Char(64)
+  requestId             String         @unique @map("request_id") @db.Uuid
+  encryptedResponse     String         @map("encrypted_response") @db.Text
+  responseExpiresAt     DateTime       @map("response_expires_at") @db.Timestamptz(6)
+  createdAt             DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  request               DocumentRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([responseExpiresAt])
+  @@map("submission_idempotency")
+}
