@@ -5,7 +5,7 @@
   "description": "Barangay document request and tracking API",
   "license": "UNLICENSED",
   "engines": {
-    "node": ">=20.11"
+    "node": ">=22.23.2 <23"
   },
   "scripts": {
     "build": "prisma generate && nest build",

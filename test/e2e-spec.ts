@@ -298,6 +298,15 @@ describe('Barangay request API (e2e)', () => {
     expect(unknown.body.detail).toBe('Invalid username or password');
   });
 
+  it('rejects a staff login from an unconfigured browser origin', async () => {
+    const response = await request(app.getHttpServer()).post('/api/v1/staff/auth/login')
+      .set('Origin', 'https://untrusted.example')
+      .set('X-Forwarded-For', testIp('untrusted-origin-login'))
+      .send({ username: 'admin', password: 'initial-admin-password' }).expect(403);
+    expect(response.body.detail).toBe('Request origin is not allowed');
+    expect(response.headers['set-cookie']).toBeUndefined();
+  });
+
   it('enforces session expiry and revokes sessions when an account role changes', async () => {
     const created = await adminRequest().post('/api/v1/staff/users')
       .set('Origin', origin).set('X-CSRF-Token', adminCsrf)

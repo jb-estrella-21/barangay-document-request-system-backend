@@ -5,4 +5,10 @@ coverage/
 .env.*
 !.env.example
 *.tsbuildinfo
+backups/
+*.dump
+*.backup
+*.bak
+*.sqlite
+*.sqlite3
 .DS_Store

@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { Request } from 'express';
 import { AppEnvironment } from '../../config/validate-env';
+import { isConfiguredOrigin } from '../origin-policy';
 
 type SessionRequest = Request & { sessionCsrfHash?: string };
 
@@ -16,7 +17,7 @@ export class CsrfGuard implements CanActivate {
 
     const allowedOrigins = this.config.get('CORS_ORIGINS', { infer: true });
     const origin = request.header('origin');
-    if (!origin || !allowedOrigins.includes(origin)) throw new ForbiddenException('Request origin is not allowed');
+    if (!origin || !isConfiguredOrigin(origin, allowedOrigins)) throw new ForbiddenException('Request origin is not allowed');
 
     const headerToken = request.header('x-csrf-token');
     if (typeof headerToken !== 'string' || headerToken.length < 32 || !request.sessionCsrfHash) {

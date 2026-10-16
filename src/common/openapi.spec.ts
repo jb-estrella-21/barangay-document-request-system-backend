@@ -57,6 +57,9 @@ describe('OpenAPI document', () => {
       expect(document.paths['/api/v1/requests'].post?.parameters).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'Idempotency-Key', required: true })]));
       expect(document.paths['/api/v1/requests'].post?.responses?.['201']).toBeDefined();
       expect(document.paths['/api/v1/requests/track'].post?.responses?.['200']).toBeDefined();
+      const loginOperation = document.paths['/api/v1/staff/auth/login'].post!;
+      expect(loginOperation.parameters).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'Origin', required: false })]));
+      expect(loginOperation.responses?.['403']).toBeDefined();
       expect(requestDetailResponses['200']?.headers?.ETag).toBeDefined();
       expect(document.paths['/api/v1/staff/requests/{id}/transitions'].post?.parameters).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'If-Match', required: true })]));
       expect(document.paths['/api/v1/staff/requests/{id}/transitions'].post?.responses?.['201']).toBeDefined();

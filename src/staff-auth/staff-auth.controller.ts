@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Patch, Post, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Patch, Post, Res, UseGuards, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ApiBody, ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBody, ApiCookieAuth, ApiHeader, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Response } from 'express';
 import { AppEnvironment } from '../config/validate-env';
@@ -11,6 +11,7 @@ import { StaffSessionGuard } from '../common/guards/staff-session.guard';
 import { LoginDto, ChangePasswordDto } from './staff-auth.dto';
 import { safeStaff, StaffAuthService } from './staff-auth.service';
 import { ApiJsonResponse, ApiProblemResponses, ApiStaffCsrfHeaders, schemas } from '../common/openapi';
+import { isConfiguredOrigin } from '../common/origin-policy';
 
 @ApiTags('staff authentication')
 @Controller('staff/auth')
@@ -19,13 +20,18 @@ export class StaffAuthController {
 
   @Post('login')
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
-  @ApiOperation({ summary: 'Create a staff session', description: 'Public login endpoint; limit: 5 attempts per client IP per minute. On success, sets the configured Secure/HttpOnly/SameSite session cookie and returns a CSRF token. Inactive accounts and incorrect credentials share the same response.' })
+  @ApiOperation({ summary: 'Create a staff session', description: 'Public login endpoint; limit: 5 attempts per client IP per minute. Browser requests that include Origin must exactly match configured CORS_ORIGINS; requests without Origin remain supported for non-browser clients. On success, sets the configured Secure/HttpOnly/SameSite session cookie and returns a CSRF token. Inactive accounts and incorrect credentials share the same response.' })
+  @ApiHeader({ name: 'Origin', required: false, description: 'If supplied, must exactly match one of the server-configured CORS_ORIGINS values.' })
   @ApiBody({ type: LoginDto })
   @ApiJsonResponse(201, 'Session created.', schemas.login, {
     'Set-Cookie': { description: 'Configured staff session cookie; HttpOnly, path-scoped to /api/v1/staff, and expires with the session.', schema: { type: 'string' } },
   })
-  @ApiProblemResponses({ status: 400, description: 'Invalid login body.' }, { status: 401, description: 'Invalid username or password.' }, { status: 413, description: 'Request body exceeds 100 KB.' }, { status: 429, description: 'Login rate limit exceeded.' }, { status: 500, description: 'Unexpected API failure.' })
-  async login(@Body() dto: LoginDto, @Res({ passthrough: true }) response: Response) {
+  @ApiProblemResponses({ status: 400, description: 'Invalid login body.' }, { status: 401, description: 'Invalid username or password.' }, { status: 403, description: 'A supplied Origin does not exactly match configured CORS_ORIGINS.' }, { status: 413, description: 'Request body exceeds 100 KB.' }, { status: 429, description: 'Login rate limit exceeded.' }, { status: 500, description: 'Unexpected API failure.' })
+  async login(@Body() dto: LoginDto, @Headers('origin') origin: string | undefined, @Res({ passthrough: true }) response: Response) {
+    const allowedOrigins = this.config.get('CORS_ORIGINS', { infer: true });
+    if (origin !== undefined && !isConfiguredOrigin(origin, allowedOrigins)) {
+      throw new ForbiddenException('Request origin is not allowed');
+    }
     const result = await this.auth.login(dto.username, dto.password);
     this.setSessionCookies(response, result.sessionToken, result.expiresAt);
     return { staff: result.staff, expiresAt: result.expiresAt, csrfToken: result.csrfToken };

@@ -48,6 +48,9 @@ export function validateEnvironment(raw: Record<string, unknown>): AppEnvironmen
   if (nodeEnv === 'production' && proxyKey?.every((byte) => byte === 0)) {
     throw new Error('CLIENT_IP_HMAC_SECRET must not use an all-zero key in production');
   }
+  if (proxyKey?.equals(encryptionKey)) {
+    throw new Error('CLIENT_IP_HMAC_SECRET must be distinct from IDEMPOTENCY_ENCRYPTION_KEY');
+  }
 
   const sameSite = String(raw.COOKIE_SAME_SITE ?? 'lax').toLowerCase();
   if (!['lax', 'strict', 'none'].includes(sameSite)) throw new Error('COOKIE_SAME_SITE must be lax, strict, or none');

@@ -30,4 +30,13 @@ describe('production client IP signing configuration', () => {
       CLIENT_IP_HMAC_SECRET: Buffer.alloc(32).toString('base64'),
     })).toThrow('CLIENT_IP_HMAC_SECRET must not use an all-zero key in production');
   });
+
+  it('rejects reuse of the idempotency encryption key for proxy signatures', () => {
+    const key = Buffer.alloc(32, 4).toString('base64');
+    expect(() => validateEnvironment({
+      ...validProductionEnvironment,
+      IDEMPOTENCY_ENCRYPTION_KEY: key,
+      CLIENT_IP_HMAC_SECRET: key,
+    })).toThrow('CLIENT_IP_HMAC_SECRET must be distinct from IDEMPOTENCY_ENCRYPTION_KEY');
+  });
 });
